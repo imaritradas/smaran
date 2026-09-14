@@ -105,6 +105,68 @@ const strings: Record<string, Record<SupportedLanguage, string>> = {
     kha: "Ki Kam",
   },
 
+  // ── GPS & Safe Zone Section ──
+  "gps.safeZoneActive": {
+    en: "Safe Zone Active",
+    as: "সুৰক্ষিত মণ্ডল সক্ৰিয়",
+    brx: "रैखा ओनसोल गोसोआव दं",
+    kha: "Ka Jaka Shngain",
+  },
+  "gps.safeZoneAtHome": {
+    en: "Safe at Home",
+    as: "ঘৰত সুৰক্ষিত",
+    brx: "न'आव रैखाथि",
+    kha: "Shngain ha iing",
+  },
+  "gps.takeMeHome": {
+    en: "Take Me Home",
+    as: "মোক ঘৰলৈ লৈ যাওক",
+    brx: "आंखौ न'आव लां",
+    kha: "Kit noh ia nga sha iing",
+  },
+  "gps.takeMeHomeDesc": {
+    en: "Feeling lost or need directions home? Tap here.",
+    as: "ঘৰৰ বাট হেৰুৱালে বা সহায় লাগিলে ইয়াত স্পৰ্শ কৰক।",
+    brx: "न'आव थांनो हेफाजाब नांगौ नामा? बेयाव थु।",
+    kha: "Donkam jingiarap ban leit iing? Kynjoh hangne.",
+  },
+  "gps.reassuringTitle": {
+    en: "Don't Worry, We're With You",
+    as: "চিন্তা নকৰিব, আমি আপোনাৰ লগত আছোঁ",
+    brx: "गिखांनाङा, जों नोंजों दं",
+    kha: "Wat shepteng, ngi don bad phi",
+  },
+  "gps.reassuringVoice": {
+    en: "Don't worry, we are helping you get home. Your family has been notified with your exact location.",
+    as: "চিন্তা নকৰিব, আমি আপোনাক ঘৰলৈ লৈ যাবলৈ সহায় কৰি আছোঁ। আপোনাৰ পৰিয়ালক আপোনাৰ অৱস্থান জনোৱা হৈছে।",
+    brx: "गिखांनाङा, जों नोंखौ न'आव लांनो हेफाजाब होदों। नोंनि न'ख'रनो नोंनि जायगाखौ मिथिहोबाय।",
+    kha: "Wat shepteng, ngi dang iarap ban ialam ia phi sha iing. La pyntip sha ka iing jong phi ia ka jaka ba phi don.",
+  },
+  "gps.distanceToHome": {
+    en: "Distance to Home",
+    as: "ঘৰৰ পৰা দূৰত্ব",
+    brx: "न'निफ्राय गोजानथि",
+    kha: "Ka jngai na iing",
+  },
+  "gps.callCaregiver": {
+    en: "Call Caregiver",
+    as: "অভিভাৱকক ফোন কৰক",
+    brx: "सामलायगिरिनो कल खालाम",
+    kha: "Kren sha uba sumar",
+  },
+  "gps.imSafeNow": {
+    en: "I am Safe Now",
+    as: "মই এতিয়া সুৰক্ষিত",
+    brx: "आं दा रैखाथि मोनबाय",
+    kha: "Nga la shngain mynta",
+  },
+  "gps.followArrow": {
+    en: "Follow this direction towards home",
+    as: "ঘৰলৈ যাবলৈ এই দিশ অনুসৰণ কৰক",
+    brx: "न'आव थांनो बे दिगखौ नाय",
+    kha: "Bud ia kane ka lynti sha iing",
+  },
+
   // ── Reminders Section ──
   "reminders.title": {
     en: "Daily Routine Reminders",

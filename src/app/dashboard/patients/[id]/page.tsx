@@ -6,6 +6,7 @@ import { useParams, useRouter } from "next/navigation";
 import TrendCard from "@/components/TrendCard";
 import AlertCard from "@/components/AlertCard";
 import CognitiveVerdictCard from "@/components/CognitiveVerdictCard";
+import GPSMonitoringCard from "@/components/GPSMonitoringCard";
 import {
   TrendMetric,
   CognitiveVerdict,
@@ -518,6 +519,13 @@ export default function PatientDetailDashboardPage() {
           onApplyRecommendation={handleApplyRecommendation}
         />
       </div>
+
+      {/* GPS Location & Safe Zone Geofencing Radar */}
+      <GPSMonitoringCard
+        patientId={patientId}
+        patientName={patient?.name || "Patient"}
+        onAlertTriggered={() => loadData(true)}
+      />
 
       {/* Reminders & Send Important Alerts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

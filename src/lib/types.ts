@@ -104,3 +104,37 @@ export interface PatientCode {
   caregiverId: string;
   createdAt: number;
 }
+
+// ─── GPS & Safe-Zone Geofencing Types ────────────────────────────────
+
+export interface LocationRecord {
+  id: string;
+  patientId: string;
+  latitude: number;
+  longitude: number;
+  accuracy: number; // in meters
+  heading: number | null;
+  speed: number | null;
+  timestamp: number;
+  isLostSOS?: boolean;
+}
+
+export interface SafeZoneConfig {
+  patientId: string;
+  homeLatitude: number;
+  homeLongitude: number;
+  homeAddress?: string;
+  radiusMeters: number; // e.g. 200m
+  enabled: boolean;
+  updatedAt: number;
+}
+
+export interface LocationStatusResponse {
+  currentLocation: LocationRecord | null;
+  safeZone: SafeZoneConfig | null;
+  distanceMeters: number | null;
+  isOutsideSafeZone: boolean;
+  bearingDegrees?: number;
+  history: LocationRecord[];
+}
+

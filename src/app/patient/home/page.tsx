@@ -6,6 +6,7 @@ import GameTile from "@/components/GameTile";
 import { SupportedLanguage, GameType } from "@/lib/types";
 import { getTranslation, speakPrompt } from "@/lib/i18n";
 import { ReminderRecord, NotificationRecord } from "@/lib/serverStore";
+import PatientGPSBeacon from "@/components/PatientGPSBeacon";
 
 export default function PatientHomePage() {
   const [lang, setLang] = useState<SupportedLanguage>("as");
@@ -184,6 +185,12 @@ export default function PatientHomePage() {
           <span className="sm:hidden">{getTranslation(lang, "nav.language")}</span>
         </Link>
       </div>
+
+      {/* GPS Location & Safe Zone Beacon */}
+      <PatientGPSBeacon
+        patientId={patientCode || "pat_602188"}
+        lang={lang}
+      />
 
       {/* Urgent Alert Banner (if any unread alert from caregiver) */}
       {latestAlert && (

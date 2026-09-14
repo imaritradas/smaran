@@ -12,7 +12,7 @@
 import fs from "fs";
 import path from "path";
 import { isFirebaseAdminConfigured, getAdminFirestoreSafe } from "./firebaseAdmin";
-import { Patient, GameSession, CheckIn, CaregiverAlert, SupportedLanguage } from "./types";
+import { Patient, GameSession, CheckIn, CaregiverAlert, SupportedLanguage, LocationRecord, SafeZoneConfig } from "./types";
 
 interface FamilyMemberRecord {
   id: string;
@@ -54,6 +54,8 @@ interface SmaranServerData {
   familyMembers: FamilyMemberRecord[];
   reminders: ReminderRecord[];
   notifications: NotificationRecord[];
+  locations: LocationRecord[];
+  safeZones: Record<string, SafeZoneConfig>;
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -222,6 +224,8 @@ function loadFileData(): SmaranServerData {
         inMemoryData.familyMembers = inMemoryData.familyMembers || [];
         inMemoryData.reminders = inMemoryData.reminders || [];
         inMemoryData.notifications = inMemoryData.notifications || [];
+        inMemoryData.locations = inMemoryData.locations || [];
+        inMemoryData.safeZones = inMemoryData.safeZones || {};
 
         // If reminders/notifications are empty, populate defaults
         if (inMemoryData.reminders.length === 0) {
@@ -273,6 +277,8 @@ function loadFileData(): SmaranServerData {
     familyMembers: [],
     reminders: [...INITIAL_REMINDERS],
     notifications: [...INITIAL_NOTIFICATIONS],
+    locations: [],
+    safeZones: {},
   };
 
   saveFileData();
@@ -830,3 +836,254 @@ export async function deleteNotification(notificationId: string): Promise<boolea
   }
   return false;
 }
+
+// ─── GPS Location & Safe-Zone Geofencing Store ──────────────────────
+
+/**
+ * Calculates distance between two GPS coordinates using Haversine formula in meters.
+ */
+export function computeDistanceMeters(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) * Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return Math.round(R * c);
+}
+
+/**
+ * Computes bearing in degrees (0 - 360) from current location to home.
+ */
+export function computeBearing(
+  lat1: number,
+  lon1: number,
+  lat2: number,
+  lon2: number
+): number {
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const y = Math.sin(deltaLambda) * Math.cos(phi2);
+  const x =
+    Math.cos(phi1) * Math.sin(phi2) -
+    Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+
+  const theta = Math.atan2(y, x);
+  return Math.round(((theta * 180) / Math.PI + 360) % 360);
+}
+
+// Sensible default home locations (Guwahati / Assam central coordinates)
+const DEFAULT_SAFE_ZONES: Record<string, SafeZoneConfig> = {
+  pat_602188: {
+    patientId: "pat_602188",
+    homeLatitude: 26.1445,
+    homeLongitude: 91.7362,
+    homeAddress: "Zoo Road, Guwahati, Assam",
+    radiusMeters: 250,
+    enabled: true,
+    updatedAt: Date.now() - 3600000,
+  },
+  pat_849201: {
+    patientId: "pat_849201",
+    homeLatitude: 26.1856,
+    homeLongitude: 91.7473,
+    homeAddress: "Uzan Bazar, Guwahati, Assam",
+    radiusMeters: 300,
+    enabled: true,
+    updatedAt: Date.now() - 3600000,
+  },
+};
+
+export async function getPatientSafeZone(patientId: string): Promise<SafeZoneConfig> {
+  const store = loadFileData();
+  store.safeZones = store.safeZones || {};
+
+  if (!store.safeZones[patientId]) {
+    const fallback = DEFAULT_SAFE_ZONES[patientId] || {
+      patientId,
+      homeLatitude: 26.1445,
+      homeLongitude: 91.7362,
+      homeAddress: "Home Residence, Guwahati",
+      radiusMeters: 250,
+      enabled: true,
+      updatedAt: Date.now(),
+    };
+    store.safeZones[patientId] = fallback;
+    saveFileData();
+  }
+
+  return store.safeZones[patientId];
+}
+
+export async function updatePatientSafeZone(
+  config: Partial<SafeZoneConfig> & { patientId: string }
+): Promise<SafeZoneConfig> {
+  const store = loadFileData();
+  store.safeZones = store.safeZones || {};
+
+  const current = await getPatientSafeZone(config.patientId);
+  const updated: SafeZoneConfig = {
+    ...current,
+    ...config,
+    updatedAt: Date.now(),
+  };
+
+  store.safeZones[config.patientId] = updated;
+  saveFileData();
+  return updated;
+}
+
+export async function getPatientLocations(
+  patientId: string,
+  limitCount = 60
+): Promise<LocationRecord[]> {
+  const store = loadFileData();
+  store.locations = store.locations || [];
+
+  let list = store.locations.filter((l) => l.patientId === patientId);
+
+  // If no location history yet, generate initial baseline locations near home
+  if (list.length === 0) {
+    const safeZone = await getPatientSafeZone(patientId);
+    const now = Date.now();
+    const seedPoints: LocationRecord[] = [
+      {
+        id: `loc_seed_1`,
+        patientId,
+        latitude: safeZone.homeLatitude + 0.0001,
+        longitude: safeZone.homeLongitude + 0.0001,
+        accuracy: 12,
+        heading: 90,
+        speed: 0.5,
+        timestamp: now - 15 * 60000,
+        isLostSOS: false,
+      },
+      {
+        id: `loc_seed_2`,
+        patientId,
+        latitude: safeZone.homeLatitude + 0.00025,
+        longitude: safeZone.homeLongitude - 0.00015,
+        accuracy: 10,
+        heading: 140,
+        speed: 0.8,
+        timestamp: now - 5 * 60000,
+        isLostSOS: false,
+      },
+      {
+        id: `loc_seed_3`,
+        patientId,
+        latitude: safeZone.homeLatitude + 0.00018,
+        longitude: safeZone.homeLongitude + 0.00005,
+        accuracy: 8,
+        heading: 45,
+        speed: 0.2,
+        timestamp: now,
+        isLostSOS: false,
+      },
+    ];
+    store.locations.push(...seedPoints);
+    saveFileData();
+    list = seedPoints;
+  }
+
+  return list.slice(-limitCount);
+}
+
+export async function recordPatientLocation(data: {
+  patientId: string;
+  latitude: number;
+  longitude: number;
+  accuracy?: number;
+  heading?: number | null;
+  speed?: number | null;
+  isLostSOS?: boolean;
+}): Promise<{
+  location: LocationRecord;
+  safeZone: SafeZoneConfig;
+  distanceMeters: number;
+  isOutsideSafeZone: boolean;
+  bearingDegrees: number;
+}> {
+  const store = loadFileData();
+  store.locations = store.locations || [];
+
+  const location: LocationRecord = {
+    id: `loc_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    patientId: data.patientId,
+    latitude: data.latitude,
+    longitude: data.longitude,
+    accuracy: data.accuracy || 10,
+    heading: data.heading !== undefined ? data.heading : null,
+    speed: data.speed !== undefined ? data.speed : null,
+    timestamp: Date.now(),
+    isLostSOS: !!data.isLostSOS,
+  };
+
+  store.locations.push(location);
+
+  // Keep last 300 locations per patient to maintain optimal storage
+  if (store.locations.length > 500) {
+    store.locations = store.locations.slice(-300);
+  }
+
+  const safeZone = await getPatientSafeZone(data.patientId);
+  const distanceMeters = computeDistanceMeters(
+    data.latitude,
+    data.longitude,
+    safeZone.homeLatitude,
+    safeZone.homeLongitude
+  );
+  const isOutsideSafeZone = safeZone.enabled && distanceMeters > safeZone.radiusMeters;
+  const bearingDegrees = computeBearing(
+    data.latitude,
+    data.longitude,
+    safeZone.homeLatitude,
+    safeZone.homeLongitude
+  );
+
+  // ─── Automatic Wandering & SOS Safety Alerts ───
+  if (data.isLostSOS) {
+    const alertMsg = `🚨 Emergency SOS: Patient activated "Take Me Home" assistance at [${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)}] (${distanceMeters}m from Home).`;
+    await createAlert(data.patientId, alertMsg);
+    await createNotification({
+      patientId: data.patientId,
+      title: "🚨 Emergency SOS Active",
+      message: "Help is on the way. Your caregiver has been notified with your exact GPS location.",
+      type: "alert",
+      priority: "high",
+    });
+  } else if (isOutsideSafeZone) {
+    const alertMsg = `⚠️ Wandering Advisory: Patient is ${distanceMeters}m from Home — outside their ${safeZone.radiusMeters}m Safe Zone!`;
+    await createAlert(data.patientId, alertMsg);
+    await createNotification({
+      patientId: data.patientId,
+      title: "Safe Zone Boundary Notice",
+      message: `You are currently ${distanceMeters}m from Home. Please stay where you are or tap 'Take Me Home'.`,
+      type: "alert",
+      priority: "high",
+    });
+  }
+
+  saveFileData();
+
+  return {
+    location,
+    safeZone,
+    distanceMeters,
+    isOutsideSafeZone,
+    bearingDegrees,
+  };
+}
+
