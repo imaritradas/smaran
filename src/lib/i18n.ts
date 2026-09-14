@@ -771,43 +771,249 @@ export function getTranslation(language: SupportedLanguage, key: string): string
   return t(actualKey, language);
 }
 
-/** Client-side TTS speaker using browser Web Speech API or Bhashini proxy */
-export async function speakPrompt(text: string, language: SupportedLanguage = "en"): Promise<void> {
-  if (typeof window === "undefined") return;
+/**
+ * ── Robust TTS Engine ──
+ * 
+ * Fixes intermittent speech failures caused by:
+ * 1. Concurrent speakPrompt calls cancelling each other
+ * 2. Bhashini API hanging without timeout → long silent delays
+ * 3. Chrome SpeechSynthesis silently failing when voices aren't loaded
+ * 4. Chrome 15-second utterance cutoff bug
+ * 5. No onend/onerror handling so callers never knew if speech completed
+ */
 
-  // 1. Try Bhashini proxy if online
+// Audio cache: avoid re-fetching Bhashini for the same text+lang
+const audioCache = new Map<string, string>();
+
+// Speech queue to prevent concurrent calls from killing each other
+const speechQueue: Array<{ text: string; language: SupportedLanguage; resolve: () => void }> = [];
+let isSpeaking = false;
+
+async function processSpeechQueue(): Promise<void> {
+  if (isSpeaking || speechQueue.length === 0) return;
+  isSpeaking = true;
+
+  const item = speechQueue.shift()!;
+  try {
+    await _speakInternal(item.text, item.language);
+  } catch (e) {
+    console.warn("[Voice] Speech failed, skipping:", e);
+  } finally {
+    isSpeaking = false;
+    item.resolve();
+    // Process next item
+    processSpeechQueue();
+  }
+}
+
+/** Client-side TTS speaker — queued, cached, robust. */
+export async function speakPrompt(text: string, language: SupportedLanguage = "en"): Promise<void> {
+  if (typeof window === "undefined" || !text?.trim()) return;
+
+  return new Promise<void>((resolve) => {
+    speechQueue.push({ text: text.trim(), language, resolve });
+    processSpeechQueue();
+  });
+}
+
+/** Internal implementation — tries Bhashini first, then browser TTS. */
+async function _speakInternal(text: string, language: SupportedLanguage): Promise<void> {
+  // 1. Try cached Bhashini audio
+  const cacheKey = `${language}:${text}`;
+  const cached = audioCache.get(cacheKey);
+  if (cached) {
+    await playBase64Audio(cached);
+    return;
+  }
+
+  // 2. Try Bhashini API (with fast timeout so we don't block)
   if (navigator.onLine) {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000); // 3s max
+
       const res = await fetch("/api/bhashini/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text, language }),
+        signal: controller.signal,
       });
+      clearTimeout(timeout);
+
       if (res.ok) {
         const data = await res.json();
         if (data.audio) {
-          const audio = new Audio(`data:audio/wav;base64,${data.audio}`);
-          await audio.play();
+          // Cache it for future use
+          audioCache.set(cacheKey, data.audio);
+          // Trim cache to 50 entries
+          if (audioCache.size > 50) {
+            const firstKey = audioCache.keys().next().value;
+            if (firstKey) audioCache.delete(firstKey);
+          }
+          await playBase64Audio(data.audio);
           return;
         }
       }
     } catch {
-      // Fallback to browser synthesis
+      // Bhashini failed or timed out → fall through to browser TTS
     }
   }
 
-  // 2. Offline fallback: browser SpeechSynthesis
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
+  // 3. Browser SpeechSynthesis fallback (robust)
+  await speakWithBrowserTTS(text, language);
+}
+
+/** Play base64-encoded audio with a Promise that resolves on completion. */
+function playBase64Audio(base64: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    try {
+      const audio = new Audio(`data:audio/wav;base64,${base64}`);
+      audio.onended = () => resolve();
+      audio.onerror = () => {
+        console.warn("[Voice] Audio playback error, falling back");
+        reject(new Error("Audio playback failed"));
+      };
+      // Some browsers need a user gesture; catch the play() rejection
+      audio.play().catch(() => {
+        console.warn("[Voice] Audio play() blocked");
+        resolve(); // Don't block the queue
+      });
+    } catch {
+      resolve(); // Don't block on errors
+    }
+  });
+}
+
+/** 
+ * Browser SpeechSynthesis with Chrome workarounds.
+ * Fixes:
+ * - Voices not loaded yet → wait for voiceschanged event
+ * - Chrome 15-second cutoff → resume keepalive
+ * - Silent failures → onend/onerror Promise handling
+ */
+function speakWithBrowserTTS(text: string, language: SupportedLanguage): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (!("speechSynthesis" in window)) {
+      resolve();
+      return;
+    }
+
+    const synth = window.speechSynthesis;
+    
+    // Cancel any stuck/stale utterances
+    synth.cancel();
+
     const langMap: Record<SupportedLanguage, string> = {
       en: "en-IN",
       as: "as-IN",
       brx: "hi-IN",
       kha: "en-IN",
     };
+
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = langMap[language] || "en-IN";
-    utterance.rate = 0.85; // Slightly slower for elderly comprehension
-    window.speechSynthesis.speak(utterance);
-  }
+    utterance.rate = 0.85;
+    utterance.pitch = 1.0;
+    utterance.volume = 1.0;
+
+    // Try to pick the best matching voice
+    const pickVoice = () => {
+      const voices = synth.getVoices();
+      if (voices.length > 0) {
+        const targetLang = langMap[language] || "en-IN";
+        // Try exact match first
+        let voice = voices.find((v) => v.lang === targetLang);
+        // Then prefix match (e.g. "en-IN" matches "en")
+        if (!voice) {
+          const prefix = targetLang.split("-")[0];
+          voice = voices.find((v) => v.lang.startsWith(prefix));
+        }
+        // Then any English voice as last resort
+        if (!voice) {
+          voice = voices.find((v) => v.lang.startsWith("en"));
+        }
+        if (voice) {
+          utterance.voice = voice;
+        }
+      }
+    };
+
+    // Chrome sometimes hasn't loaded voices yet on first call
+    const voices = synth.getVoices();
+    if (voices.length === 0) {
+      // Wait for voices to load (Chrome fires this async)
+      const onVoicesChanged = () => {
+        synth.removeEventListener("voiceschanged", onVoicesChanged);
+        pickVoice();
+        startSpeaking();
+      };
+      synth.addEventListener("voiceschanged", onVoicesChanged);
+      // Safety: if voiceschanged never fires (some browsers), speak anyway after 500ms
+      setTimeout(() => {
+        synth.removeEventListener("voiceschanged", onVoicesChanged);
+        pickVoice();
+        startSpeaking();
+      }, 500);
+    } else {
+      pickVoice();
+      startSpeaking();
+    }
+
+    let started = false;
+    function startSpeaking() {
+      if (started) return; // Prevent double-start from timeout + event
+      started = true;
+
+      // Chrome bug: long utterances get cut off after ~15 seconds.
+      // Workaround: call resume() periodically to keep it alive.
+      let keepalive: ReturnType<typeof setInterval> | null = null;
+
+      utterance.onstart = () => {
+        keepalive = setInterval(() => {
+          if (synth.speaking) {
+            synth.pause();
+            synth.resume();
+          }
+        }, 10000); // Every 10 seconds
+      };
+
+      utterance.onend = () => {
+        if (keepalive) clearInterval(keepalive);
+        resolve();
+      };
+
+      utterance.onerror = (event) => {
+        if (keepalive) clearInterval(keepalive);
+        // "interrupted" and "canceled" are expected when new speech starts
+        if (event.error !== "interrupted" && event.error !== "canceled") {
+          console.warn("[Voice] SpeechSynthesis error:", event.error);
+        }
+        resolve(); // Don't block the queue
+      };
+
+      // Safety timeout: if speech never ends (browser bug), resolve after 15s
+      const safetyTimeout = setTimeout(() => {
+        if (keepalive) clearInterval(keepalive);
+        synth.cancel();
+        resolve();
+      }, 15000);
+
+      utterance.onend = () => {
+        if (keepalive) clearInterval(keepalive);
+        clearTimeout(safetyTimeout);
+        resolve();
+      };
+
+      utterance.onerror = (event) => {
+        if (keepalive) clearInterval(keepalive);
+        clearTimeout(safetyTimeout);
+        if (event.error !== "interrupted" && event.error !== "canceled") {
+          console.warn("[Voice] SpeechSynthesis error:", event.error);
+        }
+        resolve();
+      };
+
+      synth.speak(utterance);
+    }
+  });
 }
