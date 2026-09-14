@@ -1,20 +1,15 @@
 /**
  * Bhashini API client — server-side only.
  *
- * IMPORTANT: This file must ONLY be imported from API routes.
- * The Bhashini API key must never reach the browser.
+ * IMPORTANT: This file must ONLY be imported from server-side API routes.
+ * The Bhashini API key and Udyat key must never reach the browser.
  *
- * VERIFICATION NOTICE: The two-step pipeline flow below (config → callback)
- * is based on Bhashini's documented architecture as of the project's design
- * date. Government API portals can change their schema — if integration
- * fails, verify the current endpoint shape at:
- *   https://bhashini.gov.in/ulca
- *   https://meity-auth.ulcacontrib.org (ULCA API docs)
- *
- * The flow is:
- *   1. POST to the config endpoint with userID + ulcaApiKey headers
- *      to get a callback URL + inference key for a given task + language
- *   2. POST the actual audio/text payload to that callback URL
+ * Architecture:
+ *   1. Direct Inference (Preferred & Fast):
+ *      Calls Bhashini Dhruva Pipeline (https://dhruva-api.bhashini.gov.in/services/inference/pipeline)
+ *      using the provided Inference API Key in the Authorization header.
+ *   2. Dynamic Pipeline Config (Fallback):
+ *      Queries ULCA pipeline config to discover dynamic callback URLs if direct mode fails.
  */
 
 // In-memory cache for config responses (task+language → config)
@@ -25,15 +20,20 @@ const configCache = new Map<
 
 const CONFIG_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+const BHASHINI_DHRUVA_URL =
+  "https://dhruva-api.bhashini.gov.in/services/inference/pipeline";
+
 const BHASHINI_CONFIG_URL =
   "https://meity-auth.ulcacontrib.org/ulca/apis/v0/model/getModelsPipeline";
 
-// Bhashini language codes for supported NER languages
+// Supported language codes for Bhashini
 const LANGUAGE_CODE_MAP: Record<string, string> = {
   en: "en",
   as: "as",
   brx: "brx",
   kha: "kha",
+  hi: "hi",
+  bn: "bn",
 };
 
 interface PipelineConfig {
@@ -42,7 +42,27 @@ interface PipelineConfig {
 }
 
 /**
- * Step 1: Get pipeline config (callback URL + inference key) for a task+language.
+ * Returns the configured Inference API Key (checks BHASHINI_INFERENCE_API_KEY or BHASHINI_ULCA_API_KEY).
+ */
+function getInferenceKey(): string | undefined {
+  return (
+    process.env.BHASHINI_INFERENCE_API_KEY ||
+    process.env.BHASHINI_ULCA_API_KEY
+  );
+}
+
+/**
+ * Returns the configured User/Udyat identifier (checks BHASHINI_UDYAT_KEY or BHASHINI_USER_ID).
+ */
+function getUdyatKey(): string | undefined {
+  return (
+    process.env.BHASHINI_UDYAT_KEY ||
+    process.env.BHASHINI_USER_ID
+  );
+}
+
+/**
+ * Step 1 (Fallback): Get pipeline config (callback URL + inference key) for a task+language.
  * Caches the response to avoid redundant config calls.
  */
 async function getPipelineConfig(
@@ -60,12 +80,12 @@ async function getPipelineConfig(
     };
   }
 
-  const userId = process.env.BHASHINI_USER_ID;
-  const ulcaApiKey = process.env.BHASHINI_ULCA_API_KEY;
+  const userId = getUdyatKey();
+  const ulcaApiKey = getInferenceKey();
 
   if (!userId || !ulcaApiKey) {
     throw new Error(
-      "Bhashini credentials not configured. Set BHASHINI_USER_ID and BHASHINI_ULCA_API_KEY in .env.local"
+      "Bhashini credentials not configured. Set BHASHINI_INFERENCE_API_KEY in .env.local"
     );
   }
 
@@ -90,16 +110,10 @@ async function getPipelineConfig(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(
-      `Bhashini config request failed (${response.status}): ${text}. ` +
-      `Verify the endpoint shape at https://bhashini.gov.in/ulca`
-    );
+    throw new Error(`Bhashini config request failed (${response.status}): ${text}`);
   }
 
   const data = await response.json();
-
-  // Extract callback URL and inference key from the pipeline response
-  // NOTE: This structure should be verified against current Bhashini docs
   const pipelineResponse = data.pipelineResponseConfig?.[0];
   const callbackUrl =
     pipelineResponse?.config?.[0]?.serviceId
@@ -110,8 +124,7 @@ async function getPipelineConfig(
 
   if (!callbackUrl || !inferenceApiKey) {
     throw new Error(
-      "Could not extract callback URL or inference key from Bhashini config response. " +
-      "The API response shape may have changed — verify at https://bhashini.gov.in/ulca"
+      "Could not extract callback URL or inference key from Bhashini config response"
     );
   }
 
@@ -126,14 +139,20 @@ async function getPipelineConfig(
 
 /**
  * Text-to-Speech: convert text to audio via Bhashini.
- * Returns base64-encoded audio.
+ * Returns base64-encoded audio (WAV format).
  */
 export async function textToSpeech(
   text: string,
   language: string
 ): Promise<string> {
   const langCode = LANGUAGE_CODE_MAP[language] || language;
-  const config = await getPipelineConfig("tts", langCode);
+  const inferenceKey = getInferenceKey();
+
+  if (!inferenceKey) {
+    throw new Error(
+      "Bhashini Inference API key not configured. Please set BHASHINI_INFERENCE_API_KEY in .env.local"
+    );
+  }
 
   const requestBody = {
     pipelineTasks: [
@@ -150,30 +169,57 @@ export async function textToSpeech(
     },
   };
 
-  const response = await fetch(config.callbackUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: config.inferenceApiKey,
-    },
-    body: JSON.stringify(requestBody),
-  });
+  // 1. Try direct Dhruva inference endpoint first
+  try {
+    const response = await fetch(BHASHINI_DHRUVA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: inferenceKey,
+      },
+      body: JSON.stringify(requestBody),
+    });
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Bhashini TTS failed (${response.status}): ${errText}`);
+    if (response.ok) {
+      const data = await response.json();
+      const audioBase64 = data.pipelineResponse?.[0]?.audio?.[0]?.audioContent;
+      if (audioBase64) {
+        return audioBase64;
+      }
+    }
+  } catch (directErr) {
+    console.warn("[Bhashini TTS] Direct Dhruva call error, trying pipeline config fallback:", directErr);
   }
 
-  const data = await response.json();
-  const audioBase64 = data.pipelineResponse?.[0]?.audio?.[0]?.audioContent;
+  // 2. Fallback to pipeline config flow if direct call was not successful
+  try {
+    const config = await getPipelineConfig("tts", langCode);
+    const response = await fetch(config.callbackUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: config.inferenceApiKey,
+      },
+      body: JSON.stringify(requestBody),
+    });
 
-  if (!audioBase64) {
-    throw new Error(
-      "No audio content in Bhashini TTS response — API shape may have changed"
-    );
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Bhashini TTS failed (${response.status}): ${errText}`);
+    }
+
+    const data = await response.json();
+    const audioBase64 = data.pipelineResponse?.[0]?.audio?.[0]?.audioContent;
+
+    if (!audioBase64) {
+      throw new Error("No audio content returned in Bhashini TTS response");
+    }
+
+    return audioBase64;
+  } catch (fallbackErr) {
+    const msg = fallbackErr instanceof Error ? fallbackErr.message : "TTS failed";
+    throw new Error(`Bhashini TTS failed for language '${langCode}': ${msg}`);
   }
-
-  return audioBase64;
 }
 
 /**
@@ -185,7 +231,13 @@ export async function speechToText(
   language: string
 ): Promise<string> {
   const langCode = LANGUAGE_CODE_MAP[language] || language;
-  const config = await getPipelineConfig("asr", langCode);
+  const inferenceKey = getInferenceKey();
+
+  if (!inferenceKey) {
+    throw new Error(
+      "Bhashini Inference API key not configured. Please set BHASHINI_INFERENCE_API_KEY in .env.local"
+    );
+  }
 
   const requestBody = {
     pipelineTasks: [
@@ -201,6 +253,30 @@ export async function speechToText(
     },
   };
 
+  // 1. Try direct Dhruva inference endpoint first
+  try {
+    const response = await fetch(BHASHINI_DHRUVA_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: inferenceKey,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const transcript = data.pipelineResponse?.[0]?.output?.[0]?.source;
+      if (transcript !== undefined) {
+        return transcript;
+      }
+    }
+  } catch (directErr) {
+    console.warn("[Bhashini ASR] Direct Dhruva call error, trying pipeline config fallback:", directErr);
+  }
+
+  // 2. Fallback to pipeline config flow
+  const config = await getPipelineConfig("asr", langCode);
   const response = await fetch(config.callbackUrl, {
     method: "POST",
     headers: {
@@ -218,10 +294,8 @@ export async function speechToText(
   const data = await response.json();
   const transcript = data.pipelineResponse?.[0]?.output?.[0]?.source;
 
-  if (!transcript) {
-    throw new Error(
-      "No transcript in Bhashini ASR response — API shape may have changed"
-    );
+  if (transcript === undefined) {
+    throw new Error("No transcript in Bhashini ASR response");
   }
 
   return transcript;
