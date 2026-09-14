@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import OfflineIndicator from "@/components/OfflineIndicator";
@@ -17,6 +17,27 @@ const NAV_CONFIG = [
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
         <polyline points="9 22 9 12 15 12 15 22"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/patient/reminders",
+    key: "nav.reminders",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    ),
+  },
+  {
+    href: "/patient/notifications",
+    key: "nav.notifications",
+    badge: true,
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
       </svg>
     ),
   },
@@ -85,13 +106,29 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
   const [patientName, setPatientName] = useState("");
   const [patientCode, setPatientCode] = useState("");
   const [patientPhoto, setPatientPhoto] = useState<string | null>(null);
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState(0);
   const [isDark, setIsDark] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const refreshState = () => {
+  const fetchUnreadCount = useCallback(async (pid: string) => {
+    try {
+      const res = await fetch(`/api/notifications?patientId=${encodeURIComponent(pid)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.notifications) {
+          const unread = data.notifications.filter((n: { read: boolean }) => !n.read).length;
+          setUnreadNotifsCount(unread);
+        }
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const refreshState = useCallback(() => {
     if (typeof window === "undefined") return;
     const storedLang = (localStorage.getItem("smaran_lang") || "as") as SupportedLanguage;
-    const storedName = localStorage.getItem("smaran_patient_name") || "Bhaben Baruah";
+    const storedName = localStorage.getItem("smaran_patient_name") || "Mohit";
     const storedCode = localStorage.getItem("smaran_patient_code") || localStorage.getItem("smaran_patient_id") || "pat_602188";
     const storedPhoto = localStorage.getItem("smaran_patient_photo") || null;
     setLang(storedLang);
@@ -99,16 +136,18 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
     setPatientCode(storedCode);
     setPatientPhoto(storedPhoto);
 
+    const pid = localStorage.getItem("smaran_patient_id") || "pat_602188";
+    fetchUnreadCount(pid);
+
     const theme = localStorage.getItem("smaran_theme");
     const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
     setIsDark(theme === "dark" || (!theme && prefersDark));
-  };
+  }, [fetchUnreadCount]);
 
   useEffect(() => {
     initClientAuth();
     refreshState();
 
-    // Listen for cross-tab or in-page language changes
     const handleStorage = () => refreshState();
     window.addEventListener("storage", handleStorage);
 
@@ -140,7 +179,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
       window.removeEventListener("online", doSync);
       if (channel) channel.close();
     };
-  }, []);
+  }, [refreshState]);
 
   const toggleTheme = () => {
     const next = !isDark;
@@ -152,7 +191,6 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
   const initial = patientName ? patientName.trim().charAt(0).toUpperCase() : "S";
   const isOnboardingPage = pathname === "/patient" || pathname === "/patient/language";
 
-  // On onboarding pages (pairing/language), show simple clean header with avatar linking to home
   if (isOnboardingPage) {
     return (
       <div className="min-h-screen bg-[var(--background)] flex flex-col text-[var(--foreground)] bg-radial-glow">
@@ -165,7 +203,6 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
           </Link>
           <div className="flex items-center gap-3">
             <OfflineIndicator />
-            {/* User profile photo / initial */}
             <Link
               href="/patient/home"
               title="Go to Home"
@@ -252,6 +289,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
           {NAV_CONFIG.map((item) => {
             const isActive = pathname === item.href;
             const label = getTranslation(lang, item.key);
+            const isNotifications = item.href === "/patient/notifications";
             return (
               <Link
                 key={item.href}
@@ -262,10 +300,17 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
                     speakPrompt(msg, lang).catch(() => {});
                   }
                 }}
-                className={`nav-item ${isActive ? "active" : ""}`}
+                className={`nav-item flex items-center justify-between ${isActive ? "active" : ""}`}
               >
-                {item.icon}
-                <span>{label}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  {item.icon}
+                  <span className="truncate">{label}</span>
+                </div>
+                {isNotifications && unreadNotifsCount > 0 && (
+                  <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-rose-500 text-white animate-pulse">
+                    {unreadNotifsCount}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -327,6 +372,23 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
           </div>
 
           <div className="flex items-center gap-2.5">
+            {/* Notifications Bell Icon */}
+            <Link
+              href="/patient/notifications"
+              className="w-9 h-9 rounded-full surface-overlay flex items-center justify-center border border-[var(--border)] relative text-[var(--text-secondary)]"
+              title="Notifications"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+              {unreadNotifsCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-black flex items-center justify-center">
+                  {unreadNotifsCount}
+                </span>
+              )}
+            </Link>
+
             <OfflineIndicator />
             {/* Mobile profile photo or initial */}
             <Link
@@ -350,6 +412,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
             {NAV_CONFIG.map((item) => {
               const isActive = pathname === item.href;
               const label = getTranslation(lang, item.key);
+              const isNotifications = item.href === "/patient/notifications";
               return (
                 <Link
                   key={item.href}
@@ -361,10 +424,17 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
                       speakPrompt(msg, lang).catch(() => {});
                     }
                   }}
-                  className={`nav-item ${isActive ? "active" : ""}`}
+                  className={`nav-item flex items-center justify-between ${isActive ? "active" : ""}`}
                 >
-                  {item.icon}
-                  <span>{label}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {item.icon}
+                    <span>{label}</span>
+                  </div>
+                  {isNotifications && unreadNotifsCount > 0 && (
+                    <span className="px-2 py-0.5 text-[10px] font-black rounded-full bg-rose-500 text-white animate-pulse">
+                      {unreadNotifsCount}
+                    </span>
+                  )}
                 </Link>
               );
             })}

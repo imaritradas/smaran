@@ -151,7 +151,9 @@ export async function syncToFirestore(): Promise<{
           count: sessions.length,
           timestamp: Date.now(),
         });
-        channel.close();
+        setTimeout(() => {
+          try { channel.close(); } catch {}
+        }, 1500);
       } catch { /* silent */ }
     }
 
@@ -169,11 +171,31 @@ export async function syncToFirestore(): Promise<{
 export async function saveGameSessionLocally(session: GameSession): Promise<void> {
   await saveSessionOffline(session);
 
-  // Trigger immediate sync if connected to network
+  // Trigger immediate direct sync if connected to network
   if (typeof window !== "undefined" && navigator.onLine) {
-    syncToFirestore().catch((err) =>
-      console.warn("[OfflineStore] Live sync trigger:", err)
-    );
+    try {
+      await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessions: [session] }),
+      });
+
+      // Broadcast immediately
+      if ("BroadcastChannel" in window) {
+        const channel = new BroadcastChannel("smaran_sync");
+        channel.postMessage({
+          type: "SESSION_SYNCED",
+          patientId: session.patientId,
+          session,
+          timestamp: Date.now(),
+        });
+        setTimeout(() => {
+          try { channel.close(); } catch {}
+        }, 1500);
+      }
+    } catch (err) {
+      console.warn("[OfflineStore] Immediate live sync trigger:", err);
+    }
   }
 }
 

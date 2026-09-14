@@ -68,6 +68,18 @@ const strings: Record<string, Record<SupportedLanguage, string>> = {
     brx: "हानजानि मुसुख",
     kha: "Ki Mat Kynmaw",
   },
+  "nav.reminders": {
+    en: "Reminders",
+    as: "সোঁৱৰণী",
+    brx: "गोसोखांथि",
+    kha: "Ki Jingkynmaw",
+  },
+  "nav.notifications": {
+    en: "Notifications",
+    as: "জাননী",
+    brx: "खौरां",
+    kha: "Ki Jingpynbna",
+  },
   "nav.language": {
     en: "Language",
     as: "ভাষা",
@@ -91,6 +103,76 @@ const strings: Record<string, Record<SupportedLanguage, string>> = {
     as: "কাৰ্যকলাপ",
     brx: "खामानि",
     kha: "Ki Kam",
+  },
+
+  // ── Reminders Section ──
+  "reminders.title": {
+    en: "Daily Routine Reminders",
+    as: "দৈনিক সোঁৱৰণী",
+    brx: "सान्फ्रोमनि गोसोखांथि",
+    kha: "Ki Jingkynmaw Sngi",
+  },
+  "reminders.subtitle": {
+    en: "Caregiver-scheduled care: medicines, water, walks, and meals.",
+    as: "যত্নশীলৰ দ্বাৰা নিৰ্ধাৰিত: ঔষধ, পানী, খোজ আৰু আহাৰ।",
+    brx: "जाहाथायनि दोननाय: मुलि, दै, हान्था आरो जानाय।",
+    kha: "Ki jingleh na u nongsumar: dawai, um, jingiaid bad jingbam.",
+  },
+  "reminders.markDone": {
+    en: "Mark as Done",
+    as: "সম্পূৰ্ণ হ'ল",
+    brx: "जाफुंबाय",
+    kha: "La Dep",
+  },
+  "reminders.completed": {
+    en: "Completed",
+    as: "সম্পন্ন হৈছে",
+    brx: "जाफुंबाय",
+    kha: "La Pyndep",
+  },
+  "reminders.readAloud": {
+    en: "Read All Reminders",
+    as: "সকলো সোঁৱৰণী পঢ়ক",
+    brx: "गासैबो फराय",
+    kha: "Pule Baroh",
+  },
+  "reminders.noReminders": {
+    en: "No reminders scheduled for today yet.",
+    as: "আজিৰ বাবে কোনো সোঁৱৰণী নাই।",
+    brx: "दिनै जेबो गोसोखांथि गैया।",
+    kha: "Ym don jingkynmaw mynta ka sngi.",
+  },
+
+  // ── Notifications Section ──
+  "notifications.title": {
+    en: "Notifications & Alerts",
+    as: "জাননী আৰু সতৰ্কবাৰ্তা",
+    brx: "खौरां आरो साबसिन",
+    kha: "Ki Jingpynbna bad Jingmaham",
+  },
+  "notifications.subtitle": {
+    en: "Important caregiver messages, routine reminders, and wellness updates.",
+    as: "যত্নশীলৰ গুৰুত্বপূৰ্ণ বাৰ্তা আৰু স্বাস্থ্য সতৰ্কবাৰ্তা।",
+    brx: "गोनांथार खौरां आरो देहा मोजां जानायनि साबसिन।",
+    kha: "Ki khubor ba kongsan na u nongsumar bad jingkoit jingkhiah.",
+  },
+  "notifications.markRead": {
+    en: "Mark as Read",
+    as: "পঢ়া হ'ল",
+    brx: "फरायबाय",
+    kha: "La Pule",
+  },
+  "notifications.readAloud": {
+    en: "Read Out Loud",
+    as: "উচ্চাৰণ কৰি শুনক",
+    brx: "गोसोयै खोनासं",
+    kha: "Sngap Jam",
+  },
+  "notifications.noNotifications": {
+    en: "No new notifications right now. Everything is peaceful!",
+    as: "বৰ্তমান কোনো নতুন জাননী নাই। সকলো ঠিকেই আছে!",
+    brx: "दा जेबो गोदान खौरां गैया। गासैबो मोजां!",
+    kha: "Ym don jingpynbna bathymmai mynta. Baroh ka suk!",
   },
 
   // ── Home Page ──

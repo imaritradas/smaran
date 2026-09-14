@@ -23,6 +23,28 @@ interface FamilyMemberRecord {
   createdAt: string;
 }
 
+export interface ReminderRecord {
+  id: string;
+  patientId: string;
+  title: string;
+  scheduledTime: string; // "08:30", "16:00"
+  category: "medicine" | "water" | "walk" | "food" | "general";
+  completed: boolean;
+  completedAt?: number | null;
+  createdAt: number;
+}
+
+export interface NotificationRecord {
+  id: string;
+  patientId: string;
+  title: string;
+  message: string;
+  type: "alert" | "reminder" | "caregiver" | "system";
+  priority: "high" | "normal";
+  read: boolean;
+  createdAt: number;
+}
+
 interface SmaranServerData {
   patients: Patient[];
   patientCodes: Record<string, { code: string; patientId: string; caregiverId: string; createdAt: number }>;
@@ -30,6 +52,8 @@ interface SmaranServerData {
   checkIns: CheckIn[];
   alerts: CaregiverAlert[];
   familyMembers: FamilyMemberRecord[];
+  reminders: ReminderRecord[];
+  notifications: NotificationRecord[];
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -104,6 +128,77 @@ const INITIAL_SESSIONS: GameSession[] = [
   },
 ];
 
+const INITIAL_REMINDERS: ReminderRecord[] = [
+  {
+    id: "rem_1",
+    patientId: "pat_602188",
+    title: "Take Morning Blood Pressure Tablet",
+    scheduledTime: "08:30",
+    category: "medicine",
+    completed: false,
+    createdAt: Date.now() - 3600000 * 3,
+  },
+  {
+    id: "rem_2",
+    patientId: "pat_602188",
+    title: "Drink Fresh Water / Hydrate Yourself",
+    scheduledTime: "11:00",
+    category: "water",
+    completed: false,
+    createdAt: Date.now() - 3600000 * 3,
+  },
+  {
+    id: "rem_3",
+    patientId: "pat_602188",
+    title: "Healthy Midday Meal & Fruits",
+    scheduledTime: "13:00",
+    category: "food",
+    completed: false,
+    createdAt: Date.now() - 3600000 * 3,
+  },
+  {
+    id: "rem_4",
+    patientId: "pat_602188",
+    title: "Evening Walk in Garden",
+    scheduledTime: "16:30",
+    category: "walk",
+    completed: false,
+    createdAt: Date.now() - 3600000 * 3,
+  },
+  {
+    id: "rem_5",
+    patientId: "pat_602188",
+    title: "Evening Ayurvedic Tea & Relaxation",
+    scheduledTime: "18:00",
+    category: "water",
+    completed: false,
+    createdAt: Date.now() - 3600000 * 3,
+  },
+];
+
+const INITIAL_NOTIFICATIONS: NotificationRecord[] = [
+  {
+    id: "notif_1",
+    patientId: "pat_602188",
+    title: "Caregiver Connected",
+    message: "Your caregiver is connected and monitoring your cognitive wellness & routine.",
+    type: "caregiver",
+    priority: "normal",
+    read: false,
+    createdAt: Date.now() - 7200000,
+  },
+  {
+    id: "notif_2",
+    patientId: "pat_602188",
+    title: "Hydration Alert",
+    message: "Please drink a glass of fresh water to keep your mind active and body hydrated.",
+    type: "alert",
+    priority: "high",
+    read: false,
+    createdAt: Date.now() - 1800000,
+  },
+];
+
 let inMemoryData: SmaranServerData | null = null;
 
 function loadFileData(): SmaranServerData {
@@ -125,6 +220,16 @@ function loadFileData(): SmaranServerData {
         inMemoryData.checkIns = inMemoryData.checkIns || [];
         inMemoryData.alerts = inMemoryData.alerts || [];
         inMemoryData.familyMembers = inMemoryData.familyMembers || [];
+        inMemoryData.reminders = inMemoryData.reminders || [];
+        inMemoryData.notifications = inMemoryData.notifications || [];
+
+        // If reminders/notifications are empty, populate defaults
+        if (inMemoryData.reminders.length === 0) {
+          inMemoryData.reminders = [...INITIAL_REMINDERS];
+        }
+        if (inMemoryData.notifications.length === 0) {
+          inMemoryData.notifications = [...INITIAL_NOTIFICATIONS];
+        }
 
         // Ensure default patients exist
         for (const p of INITIAL_PATIENTS) {
@@ -166,6 +271,8 @@ function loadFileData(): SmaranServerData {
       },
     ],
     familyMembers: [],
+    reminders: [...INITIAL_REMINDERS],
+    notifications: [...INITIAL_NOTIFICATIONS],
   };
 
   saveFileData();
@@ -450,6 +557,20 @@ export async function createAlert(patientId: string, message: string): Promise<C
     acknowledged: false,
   };
   store.alerts.unshift(alert);
+
+  // Automatically mirror important alert to the patient app notifications
+  const notif: NotificationRecord = {
+    id: `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    patientId,
+    title: "Caregiver Alert",
+    message,
+    type: "alert",
+    priority: "high",
+    read: false,
+    createdAt: Date.now(),
+  };
+  store.notifications.unshift(notif);
+
   saveFileData();
   return alert;
 }
@@ -480,11 +601,13 @@ export async function deletePatient(patientId: string): Promise<boolean> {
     delete store.patientCodes[patient.pairingCode];
   }
 
-  // Remove associated game sessions, check-ins, alerts, family members
+  // Remove associated records
   store.gameSessions = store.gameSessions.filter((s) => s.patientId !== patientId);
   store.checkIns = store.checkIns.filter((c) => c.patientId !== patientId);
   store.alerts = store.alerts.filter((a) => a.patientId !== patientId);
   store.familyMembers = store.familyMembers.filter((m) => m.patientId !== patientId);
+  store.reminders = store.reminders.filter((r) => r.patientId !== patientId);
+  store.notifications = store.notifications.filter((n) => n.patientId !== patientId);
 
   saveFileData();
 
@@ -539,6 +662,139 @@ export async function deleteFamilyMember(memberId: string): Promise<boolean> {
   const before = store.familyMembers.length;
   store.familyMembers = store.familyMembers.filter((m) => m.id !== memberId);
   if (store.familyMembers.length < before) {
+    saveFileData();
+    return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────
+// REMINDER OPERATIONS
+// ─────────────────────────────────────────────────────────
+
+export async function getRemindersForPatient(patientId: string): Promise<ReminderRecord[]> {
+  const store = loadFileData();
+  const list = store.reminders.filter((r) => r.patientId === patientId);
+  // Also include pat_602188 if checking local_patient or vice-versa and empty
+  if (list.length === 0 && (patientId === "local_patient" || patientId === "pat_849201")) {
+    return store.reminders.filter((r) => r.patientId === "pat_602188");
+  }
+  return list;
+}
+
+export async function createReminder(data: {
+  id?: string;
+  patientId: string;
+  title: string;
+  scheduledTime: string;
+  category?: "medicine" | "water" | "walk" | "food" | "general";
+}): Promise<ReminderRecord> {
+  const store = loadFileData();
+  const reminder: ReminderRecord = {
+    id: data.id || `rem_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    patientId: data.patientId,
+    title: data.title.trim(),
+    scheduledTime: data.scheduledTime || "09:00",
+    category: data.category || "general",
+    completed: false,
+    createdAt: Date.now(),
+  };
+
+  store.reminders.unshift(reminder);
+
+  // Also auto-notify the patient about the scheduled reminder
+  const notif: NotificationRecord = {
+    id: `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    patientId: data.patientId,
+    title: `New Reminder: ${reminder.title}`,
+    message: `Scheduled for ${reminder.scheduledTime}. Remember to take care of yourself!`,
+    type: "reminder",
+    priority: reminder.category === "medicine" ? "high" : "normal",
+    read: false,
+    createdAt: Date.now(),
+  };
+  store.notifications.unshift(notif);
+
+  saveFileData();
+  return reminder;
+}
+
+export async function toggleReminderStatus(reminderId: string, completed: boolean): Promise<ReminderRecord | null> {
+  const store = loadFileData();
+  const rem = store.reminders.find((r) => r.id === reminderId);
+  if (rem) {
+    rem.completed = completed;
+    rem.completedAt = completed ? Date.now() : null;
+    saveFileData();
+    return rem;
+  }
+  return null;
+}
+
+export async function deleteReminder(reminderId: string): Promise<boolean> {
+  const store = loadFileData();
+  const before = store.reminders.length;
+  store.reminders = store.reminders.filter((r) => r.id !== reminderId);
+  if (store.reminders.length < before) {
+    saveFileData();
+    return true;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────
+// NOTIFICATION OPERATIONS (Patient App)
+// ─────────────────────────────────────────────────────────
+
+export async function getNotificationsForPatient(patientId: string): Promise<NotificationRecord[]> {
+  const store = loadFileData();
+  const list = store.notifications.filter((n) => n.patientId === patientId);
+  if (list.length === 0 && (patientId === "local_patient" || patientId === "pat_849201")) {
+    return store.notifications.filter((n) => n.patientId === "pat_602188");
+  }
+  return list;
+}
+
+export async function createNotification(data: {
+  id?: string;
+  patientId: string;
+  title: string;
+  message: string;
+  type?: "alert" | "reminder" | "caregiver" | "system";
+  priority?: "high" | "normal";
+}): Promise<NotificationRecord> {
+  const store = loadFileData();
+  const notif: NotificationRecord = {
+    id: data.id || `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+    patientId: data.patientId,
+    title: data.title.trim(),
+    message: data.message.trim(),
+    type: data.type || "caregiver",
+    priority: data.priority || "normal",
+    read: false,
+    createdAt: Date.now(),
+  };
+  store.notifications.unshift(notif);
+  saveFileData();
+  return notif;
+}
+
+export async function markNotificationAsRead(notificationId: string): Promise<boolean> {
+  const store = loadFileData();
+  const notif = store.notifications.find((n) => n.id === notificationId);
+  if (notif) {
+    notif.read = true;
+    saveFileData();
+    return true;
+  }
+  return false;
+}
+
+export async function deleteNotification(notificationId: string): Promise<boolean> {
+  const store = loadFileData();
+  const before = store.notifications.length;
+  store.notifications = store.notifications.filter((n) => n.id !== notificationId);
+  if (store.notifications.length < before) {
     saveFileData();
     return true;
   }
