@@ -544,32 +544,62 @@ export async function getCheckInsForPatient(patientId: string): Promise<CheckIn[
 
 export async function getAlertsForPatient(patientId: string): Promise<CaregiverAlert[]> {
   const store = loadFileData();
-  return store.alerts.filter((a) => a.patientId === patientId);
+  const patientAlerts = store.alerts.filter((a) => a.patientId === patientId);
+  const seen = new Set<string>();
+  return patientAlerts.filter((a) => {
+    const key = `${a.message.trim()}_${a.acknowledged}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 export async function createAlert(patientId: string, message: string): Promise<CaregiverAlert> {
   const store = loadFileData();
+
+  // Deduplicate active alert with exact same message
+  const existing = store.alerts.find(
+    (a) => a.patientId === patientId && !a.acknowledged && a.message.trim() === message.trim()
+  );
+  if (existing) {
+    return existing;
+  }
+
   const alert: CaregiverAlert = {
     id: `alt_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
     patientId,
-    message,
+    message: message.trim(),
     createdAt: Date.now(),
     acknowledged: false,
   };
   store.alerts.unshift(alert);
 
-  // Automatically mirror important alert to the patient app notifications
-  const notif: NotificationRecord = {
-    id: `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-    patientId,
-    title: "Caregiver Alert",
-    message,
-    type: "alert",
-    priority: "high",
-    read: false,
-    createdAt: Date.now(),
-  };
-  store.notifications.unshift(notif);
+  // Clean duplicate active alerts
+  const seenAlerts = new Set<string>();
+  store.alerts = store.alerts.filter((a) => {
+    const key = `${a.patientId}_${a.message.trim()}_${a.acknowledged}`;
+    if (seenAlerts.has(key)) return false;
+    seenAlerts.add(key);
+    return true;
+  });
+
+  // Automatically mirror important alert to the patient app notifications (deduplicated)
+  const existingNotif = store.notifications.find(
+    (n) => n.patientId === patientId && !n.read && n.message.trim() === message.trim()
+  );
+  if (!existingNotif) {
+    const notif: NotificationRecord = {
+      id: `notif_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      patientId,
+      title: "Caregiver Alert",
+      message: message.trim(),
+      type: "alert",
+      priority: "high",
+      read: false,
+      createdAt: Date.now(),
+    };
+    store.notifications.unshift(notif);
+  }
 
   saveFileData();
   return alert;

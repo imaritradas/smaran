@@ -5,8 +5,10 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import TrendCard from "@/components/TrendCard";
 import AlertCard from "@/components/AlertCard";
+import CognitiveVerdictCard from "@/components/CognitiveVerdictCard";
 import {
   TrendMetric,
+  CognitiveVerdict,
   CaregiverAlert,
   GameSession,
   Patient,
@@ -47,11 +49,13 @@ export default function PatientDetailDashboardPage() {
 
   const [patient, setPatient] = useState<Patient | null>(null);
   const [trends, setTrends] = useState<TrendMetric[]>([
-    { label: "Memory", score: 80, changePct: null, direction: "unknown" },
-    { label: "Attention", score: 80, changePct: null, direction: "unknown" },
-    { label: "Pattern Recognition", score: 80, changePct: null, direction: "unknown" },
-    { label: "Routine Recall", score: 80, changePct: null, direction: "unknown" },
+    { label: "Memory", score: 80, baselineScore: 75, changePct: null, direction: "unknown" },
+    { label: "Attention", score: 80, baselineScore: 78, changePct: null, direction: "unknown" },
+    { label: "Pattern Recognition", score: 80, baselineScore: 82, changePct: null, direction: "unknown" },
+    { label: "Routine Recall", score: 80, baselineScore: 72, changePct: null, direction: "unknown" },
   ]);
+  const [verdict, setVerdict] = useState<CognitiveVerdict | null>(null);
+  const [timeHorizon, setTimeHorizon] = useState<7 | 14 | 30 | 0>(14);
   const [alerts, setAlerts] = useState<CaregiverAlert[]>([]);
   const [sessions, setSessions] = useState<GameSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,7 +77,7 @@ export default function PatientDetailDashboardPage() {
   const loadData = useCallback(async (isRefresh = false) => {
     if (isRefresh) setRefreshing(true);
     try {
-      // 1. Fetch trends, sessions, and alerts via POST /api/trends
+      // 1. Fetch trends, sessions, alerts, and executive verdict via POST /api/trends
       const res = await fetch("/api/trends", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -83,6 +87,9 @@ export default function PatientDetailDashboardPage() {
         const data = await res.json();
         if (data.trends && data.trends.length > 0) {
           setTrends(data.trends);
+        }
+        if (data.verdict) {
+          setVerdict(data.verdict);
         }
         if (data.sessions) {
           setSessions(data.sessions);
@@ -262,6 +269,23 @@ export default function PatientDetailDashboardPage() {
     }
   };
 
+  // Apply Recommendation to Daily Reminders
+  const handleApplyRecommendation = (title: string, action: string) => {
+    setReminderTitle(action.length > 50 ? `${title}: ${action.slice(0, 45)}...` : `${title}: ${action}`);
+    setReminderTime("09:30");
+    if (title.toLowerCase().includes("memory")) {
+      setReminderCategory("general");
+    } else if (title.toLowerCase().includes("routine") || title.toLowerCase().includes("scaffolding")) {
+      setReminderCategory("food");
+    } else {
+      setReminderCategory("walk");
+    }
+    const remElem = document.getElementById("reminders-section");
+    if (remElem) {
+      remElem.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
   // Send Important Alert to Patient Notifications
   const handleSendAlert = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -409,56 +433,96 @@ export default function PatientDetailDashboardPage() {
         </div>
       </div>
 
-      {/* Longitudinal Decline Alerts (if any) */}
-      {alerts && alerts.length > 0 && (
-        <div className="space-y-3">
-          <h3 className="text-lg font-bold text-[var(--text-primary)] flex items-center gap-2">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 shrink-0">
-              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-              <line x1="12" y1="9" x2="12" y2="13"/>
-              <line x1="12" y1="17" x2="12.01" y2="17"/>
-            </svg>
-            <span>Longitudinal Trend Notifications</span>
-          </h3>
-          <div className="grid grid-cols-1 gap-3">
-            {alerts.map((alt) => (
-              <AlertCard
-                key={alt.id}
-                alert={alt}
-                onAcknowledge={handleAcknowledgeAlert}
-              />
-            ))}
+      {/* Longitudinal Decline Alerts (if any unacknowledged) */}
+      {alerts && alerts.filter((a) => !a.acknowledged).length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-amber-500 shrink-0">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+              <span>Clinical Trend Notification</span>
+            </h3>
+          </div>
+          <div className="grid grid-cols-1 gap-2">
+            {alerts
+              .filter((a) => !a.acknowledged)
+              .slice(0, 2)
+              .map((alt) => (
+                <AlertCard
+                  key={alt.id}
+                  alert={alt}
+                  onAcknowledge={handleAcknowledgeAlert}
+                />
+              ))}
           </div>
         </div>
       )}
 
-      {/* 4 Trend Cards Grid */}
-      <div className="space-y-3">
-        <div className="flex items-center justify-between px-1">
+      {/* 4 Interactive Trend Cards Section */}
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
           <div>
-            <h3 className="text-xl font-bold text-[var(--text-primary)]">
-              Cognitive Domain Trends (14-Day Rolling Window)
+            <h3 className="text-xl sm:text-2xl font-black text-[var(--text-primary)] flex items-center gap-2">
+              <span>Cognitive Domain Trends & Baseline Tracking</span>
             </h3>
-            <p className="text-xs text-[var(--text-muted)] font-medium">
-              Live score evaluation updated automatically when games are completed.
+            <p className="text-xs text-[var(--text-muted)] font-medium mt-0.5">
+              Comparison of current cognitive performance against established intake baselines.
             </p>
           </div>
-          <span className="text-xs text-sky-600 dark:text-sky-400 font-bold bg-sky-500/10 px-3 py-1 rounded-full border border-sky-500/20">
-            {sessions.length} Recorded Session{sessions.length === 1 ? "" : "s"}
-          </span>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Time Horizon Selector Pills */}
+            <div className="p-1 rounded-2xl surface-overlay border border-[var(--border)] flex items-center gap-1 text-xs font-extrabold shadow-sm">
+              {[
+                { label: "7D", val: 7 as const },
+                { label: "14D Window", val: 14 as const },
+                { label: "30D", val: 30 as const },
+                { label: "All Sessions", val: 0 as const },
+              ].map((opt) => (
+                <button
+                  key={opt.label}
+                  type="button"
+                  onClick={() => setTimeHorizon(opt.val)}
+                  className={`px-3 py-1 rounded-xl transition-all ${
+                    timeHorizon === opt.val
+                      ? "blue-gradient text-white shadow-sm"
+                      : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            <span className="text-xs text-sky-600 dark:text-sky-400 font-extrabold bg-sky-500/10 px-3 py-1.5 rounded-2xl border border-sky-500/20 shrink-0">
+              {sessions.length} Recorded Session{sessions.length === 1 ? "" : "s"}
+            </span>
+          </div>
         </div>
 
+        {/* 4 Domain Cards Grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {trends.map((metric) => (
             <TrendCard key={metric.label} metric={metric} />
           ))}
         </div>
+
+        {/* Comprehensive Executive Verdict & Final Conclusion */}
+        <CognitiveVerdictCard
+          verdict={verdict}
+          patientName={patient?.name || "Patient"}
+          patientId={patientId}
+          onApplyRecommendation={handleApplyRecommendation}
+        />
       </div>
 
       {/* Reminders & Send Important Alerts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Daily Routine Reminders Creator & Synced List */}
-        <div className="lg:col-span-2 surface-raised rounded-3xl p-6 border border-[var(--border)] shadow-card space-y-5">
+        <div id="reminders-section" className="lg:col-span-2 surface-raised rounded-3xl p-6 border border-[var(--border)] shadow-card space-y-5 scroll-mt-6">
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-xl font-bold text-[var(--text-primary)] flex items-center gap-2">

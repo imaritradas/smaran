@@ -63,8 +63,26 @@ export interface CheckIn {
 export interface TrendMetric {
   label: "Memory" | "Attention" | "Pattern Recognition" | "Routine Recall";
   score: number;
+  baselineScore?: number;
   changePct: number | null;
   direction: "up" | "down" | "flat" | "unknown";
+  status?: "optimal" | "stable" | "mild_decline" | "significant_decline";
+  sessionCount?: number;
+  history?: number[];
+  insight?: string;
+}
+
+export interface CognitiveVerdict {
+  overallScore: number;
+  overallBaseline: number;
+  overallChangePct: number;
+  status: "optimal" | "stable" | "mild_decline" | "significant_decline";
+  verdictTitle: string;
+  summary: string;
+  keyFindings: Array<{ domain: string; text: string; positive: boolean }>;
+  recommendations: Array<{ title: string; action: string; category: "game" | "routine" | "clinical" }>;
+  riskLevel: "Low" | "Moderate" | "Elevated";
+  lastAssessedAt: number;
 }
 
 export interface CaregiverAlert {

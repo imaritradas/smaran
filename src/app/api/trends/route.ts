@@ -6,9 +6,8 @@ import {
   getAlertsForPatient,
   createAlert,
 } from "@/lib/serverStore";
-import { computeTrends, shouldFireAlert } from "@/lib/trends";
+import { computeTrends, computeCognitiveVerdict, shouldFireAlert } from "@/lib/trends";
 import { sendSms } from "@/lib/sms";
-import { TrendMetric } from "@/lib/types";
 
 /**
  * POST /api/trends
@@ -45,25 +44,19 @@ export async function POST(request: NextRequest) {
       (c) => c.scheduledFor >= previousStart && c.scheduledFor < currentStart
     );
 
-    let trends: TrendMetric[];
+    const patient = await getPatientById(patientId);
+    const patientName = patient?.name || "Patient";
 
-    // If there is real session data, compute trends
-    if (allSessions.length > 0) {
-      trends = computeTrends(
-        currentSessions,
-        previousSessions,
-        currentCheckIns,
-        previousCheckIns
-      );
-    } else {
-      // Baseline metrics for newly registered patient
-      trends = [
-        { label: "Memory", score: 80, changePct: null, direction: "unknown" },
-        { label: "Attention", score: 80, changePct: null, direction: "unknown" },
-        { label: "Pattern Recognition", score: 80, changePct: null, direction: "unknown" },
-        { label: "Routine Recall", score: 80, changePct: null, direction: "unknown" },
-      ];
-    }
+    // 1. Compute fine-grained trends with true baselines and history
+    const trends = computeTrends(
+      currentSessions,
+      previousSessions,
+      currentCheckIns,
+      previousCheckIns
+    );
+
+    // 2. Compute executive clinical conclusion & verdict
+    const verdict = computeCognitiveVerdict(trends, patientName);
 
     // Family Faces count in the last 7 days
     const oneWeekAgo = now - 7 * 24 * 60 * 60 * 1000;
@@ -71,7 +64,7 @@ export async function POST(request: NextRequest) {
       (s) => s.gameType === "family-faces" && s.playedAt >= oneWeekAgo
     );
 
-    // Check decline alert rule
+    // Check decline alert rule (with deduplication to prevent polling spam)
     let alertFired = false;
     if (shouldFireAlert(trends)) {
       const decliningMetrics = trends
@@ -80,19 +73,27 @@ export async function POST(request: NextRequest) {
         .join(", ");
 
       const alertMessage = `Consistent decline detected in ${decliningMetrics} over the past 14 days. Consider scheduling a wellness check.`;
-      await createAlert(patientId, alertMessage);
+      
+      const existingAlerts = await getAlertsForPatient(patientId);
+      const recentSameAlert = existingAlerts.find(
+        (a) => !a.acknowledged && (now - a.createdAt < 24 * 60 * 60 * 1000)
+      );
 
-      const patient = await getPatientById(patientId);
-      if (patient?.caregiverPhone) {
-        await sendSms(patient.caregiverPhone, alertMessage);
+      if (!recentSameAlert) {
+        await createAlert(patientId, alertMessage);
+
+        if (patient?.caregiverPhone) {
+          await sendSms(patient.caregiverPhone, alertMessage);
+        }
+        alertFired = true;
       }
-      alertFired = true;
     }
 
     const alerts = await getAlertsForPatient(patientId);
 
     return NextResponse.json({
       trends,
+      verdict,
       sessions: allSessions.slice(0, 15), // Return recent 15 sessions for display
       totalSessionsCount: allSessions.length,
       familyFacesCount: familyFacesSessions.length,
