@@ -21,6 +21,7 @@ export interface Patient {
   preferredLanguage: SupportedLanguage;
   caregiverPhone: string;
   pairingCode: string;
+  photoUrl?: string;
   createdAt: number;
 }
 

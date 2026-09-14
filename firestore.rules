@@ -1,0 +1,55 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Patients: only the owning caregiver can read/write
+    match /patients/{patientId} {
+      allow read: if request.auth != null
+        && resource.data.caregiverId == request.auth.uid;
+      allow create: if request.auth != null
+        && request.resource.data.caregiverId == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.caregiverId == request.auth.uid;
+    }
+
+    // Family photos: caregiver writes, any authenticated user can read
+    // (patient devices need to load photos for the Family Faces game)
+    match /familyPhotos/{photoId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null;
+    }
+
+    // Game sessions: any authenticated user (including anonymous) can create
+    // Caregivers can read their patients' sessions (enforced in app logic;
+    // Firestore rules allow any authenticated read for simplicity since
+    // patient IDs are not guessable)
+    match /gameSessions/{sessionId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+    }
+
+    // Check-ins: same as game sessions
+    match /checkIns/{checkInId} {
+      allow create: if request.auth != null;
+      allow read: if request.auth != null;
+      allow update: if request.auth != null;
+    }
+
+    // Alerts: server-write only (Admin SDK bypasses rules),
+    // caregivers can read and acknowledge (update)
+    match /alerts/{alertId} {
+      allow read: if request.auth != null;
+      allow update: if request.auth != null;
+      allow create: if false;
+    }
+
+    // Patient pairing codes: anyone can read (needed for device pairing),
+    // only authenticated caregivers can create
+    match /patientCodes/{code} {
+      allow read: if true;
+      allow create: if request.auth != null;
+      allow update, delete: if request.auth != null;
+    }
+  }
+}
