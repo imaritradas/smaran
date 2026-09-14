@@ -84,19 +84,19 @@ export default function FamilyFacesGamePage() {
   return (
     <div className="flex-1 flex flex-col justify-between py-2 space-y-6 animate-fade-in">
       {/* Header bar */}
-      <div className="flex items-center justify-between surface p-4 rounded-3xl border border-[var(--border)] shadow-card">
+      <div className="flex items-center justify-between surface p-4 sm:p-5 rounded-3xl border border-[var(--border)] shadow-card">
         <div>
-          <h2 className="text-xl font-bold text-[var(--text-primary)]">
+          <h2 className="text-xl sm:text-2xl font-bold text-[var(--text-primary)]">
             {getTranslation(lang, "game_family_faces")}
           </h2>
-          <p className="text-xs text-[var(--text-muted)]">Recognize your beloved family</p>
+          <p className="text-xs text-[var(--text-muted)] mt-0.5">Recognize your beloved family</p>
         </div>
         <Link
           href="/patient/home"
-          className="px-3.5 py-2 surface-overlay hover:border-sky-400 text-[var(--text-secondary)] hover:text-sky-600 text-xs font-bold rounded-2xl border border-[var(--border)] transition-colors flex items-center gap-1.5"
+          className="px-4 py-2.5 surface-overlay hover:border-sky-400 hover:bg-sky-50 dark:hover:bg-sky-950/30 text-[var(--text-secondary)] hover:text-sky-600 text-xs font-bold rounded-2xl border border-[var(--border)] transition-all flex items-center gap-2"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-          {getTranslation(lang, "back")}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          Back
         </Link>
       </div>
 

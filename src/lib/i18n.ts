@@ -273,14 +273,14 @@ export function getTranslation(language: SupportedLanguage, key: string): string
   // Map common game keys to translation strings
   const keyMap: Record<string, string> = {
     welcome: "app.tagline",
-    game_memory_match: "games.memory-match",
-    game_spot_and_tap: "games.spot-and-tap",
-    game_sequence_recall: "games.sequence-recall",
-    game_routine_recall: "games.routine-recall",
-    game_family_faces: "games.family-faces",
-    tap_to_start: "pair.button",
-    well_done: "games.wellDone",
-    back: "games.back",
+    game_memory_match: "hub.memory",
+    game_spot_and_tap: "hub.attention",
+    game_sequence_recall: "hub.sequence",
+    game_routine_recall: "hub.routine",
+    game_family_faces: "hub.family",
+    tap_to_start: "game.start",
+    well_done: "game.done",
+    back: "game.back",
   };
 
   const actualKey = keyMap[key] || key;
