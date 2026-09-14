@@ -120,6 +120,33 @@ export default function CaregiverDashboardPage() {
     en: "English",
   };
 
+  const handleDeletePatient = async (patientId: string, name: string) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to remove patient "${name}"?\n\nThis will permanently delete their profile, paired code, and recorded sessions.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`/api/patients?patientId=${encodeURIComponent(patientId)}`, {
+        method: "DELETE",
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setPatients((prev) => prev.filter((p) => p.id !== patientId));
+        if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+          const channel = new BroadcastChannel("smaran_sync");
+          channel.postMessage({ type: "PATIENT_DELETED", patientId });
+          channel.close();
+        }
+      } else {
+        alert(data.error || "Failed to remove patient");
+      }
+    } catch (err) {
+      console.error("Failed to delete patient:", err);
+      alert("Network error: Could not remove patient.");
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       {/* Top Banner Alert on Successful Patient Registration */}
@@ -258,6 +285,20 @@ export default function CaregiverDashboardPage() {
                   >
                     Family Photos
                   </Link>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePatient(pat.id, pat.name)}
+                    className="py-3 px-3.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-2xl border border-rose-200 dark:border-rose-900/40 transition-colors flex items-center justify-center shrink-0"
+                    title="Remove Patient"
+                  >
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      <line x1="10" y1="11" x2="10" y2="17"></line>
+                      <line x1="14" y1="11" x2="14" y2="17"></line>
+                    </svg>
+                  </button>
                 </div>
               </div>
             ))}

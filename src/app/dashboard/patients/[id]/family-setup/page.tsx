@@ -27,16 +27,38 @@ export default function FamilySetupPage() {
 
   const loadMembers = useCallback(async () => {
     try {
-      const local = await getLocalFamilyMembers();
-      if (local && local.length > 0) {
-        setMembers(
-          local.filter(
-            (m) => m.patientId === patientId || m.patientId === "local"
-          )
-        );
+      // 1. Try server API
+      const res = await fetch(`/api/family?patientId=${encodeURIComponent(patientId)}`);
+      let serverList: FamilyPhotoItem[] = [];
+      if (res.ok) {
+        const data = await res.json();
+        if (data.members && Array.isArray(data.members)) {
+          serverList = data.members;
+        }
       }
-    } catch {
-      // offline silent
+
+      // 2. Fallback / merge with local store
+      const local = await getLocalFamilyMembers();
+      const localFiltered = (local || []).filter(
+        (m) => m.patientId === patientId || m.patientId === "local"
+      );
+
+      // Merge avoiding duplicates by id
+      const map = new Map<string, FamilyPhotoItem>();
+      for (const m of serverList) map.set(m.id, m);
+      for (const m of localFiltered) {
+        if (!map.has(m.id)) map.set(m.id, m);
+      }
+
+      setMembers(Array.from(map.values()));
+    } catch (err) {
+      console.warn("Could not fetch server family members, using local:", err);
+      try {
+        const local = await getLocalFamilyMembers();
+        if (local) {
+          setMembers(local.filter((m) => m.patientId === patientId || m.patientId === "local"));
+        }
+      } catch {}
     }
   }, [patientId]);
 
@@ -59,9 +81,36 @@ export default function FamilySetupPage() {
       createdAt: new Date().toISOString(),
     };
 
-    await saveFamilyMemberLocally(newMember);
+    try {
+      // Post to Server API
+      await fetch("/api/family", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newMember),
+      });
+    } catch (err) {
+      console.warn("Failed to sync to server, saving locally:", err);
+    }
+
+    // Always cache locally in IndexedDB as well
+    try {
+      await saveFamilyMemberLocally(newMember);
+    } catch {}
+
     setMembers((prev) => [newMember, ...prev]);
     setSaving(false);
+  };
+
+  const handleDeleteMember = async (memberId: string) => {
+    if (!confirm("Are you sure you want to remove this family member?")) return;
+    try {
+      await fetch(`/api/family?id=${encodeURIComponent(memberId)}`, {
+        method: "DELETE",
+      });
+    } catch (err) {
+      console.warn("Server delete failed:", err);
+    }
+    setMembers((prev) => prev.filter((m) => m.id !== memberId));
   };
 
   return (
@@ -126,6 +175,20 @@ export default function FamilySetupPage() {
                     {mem.relation}
                   </p>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMember(mem.id)}
+                  className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors shrink-0"
+                  title="Remove family member"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    <line x1="10" y1="11" x2="10" y2="17"></line>
+                    <line x1="14" y1="11" x2="14" y2="17"></line>
+                  </svg>
+                </button>
               </div>
             ))}
 

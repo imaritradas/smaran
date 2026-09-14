@@ -6,11 +6,13 @@ import { usePathname } from "next/navigation";
 import OfflineIndicator from "@/components/OfflineIndicator";
 import { initClientAuth } from "@/lib/firebase";
 import { syncPendingSessions } from "@/lib/offlineStore";
+import { SupportedLanguage } from "@/lib/types";
+import { getTranslation, speakPrompt } from "@/lib/i18n";
 
-const NAV_ITEMS = [
+const NAV_CONFIG = [
   {
     href: "/patient/home",
-    label: "Home",
+    key: "nav.home",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -20,7 +22,7 @@ const NAV_ITEMS = [
   },
   {
     href: "/patient/games/memory-match",
-    label: "Memory Match",
+    key: "nav.memoryMatch",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <rect x="3" y="3" width="7" height="7" rx="1.5"/>
@@ -32,7 +34,7 @@ const NAV_ITEMS = [
   },
   {
     href: "/patient/games/spot-and-tap",
-    label: "Spot and Tap",
+    key: "nav.spotAndTap",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10"/>
@@ -43,7 +45,7 @@ const NAV_ITEMS = [
   },
   {
     href: "/patient/games/sequence-recall",
-    label: "Sequence Recall",
+    key: "nav.sequenceRecall",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M9 18V5l12-2v13"/>
@@ -54,7 +56,7 @@ const NAV_ITEMS = [
   },
   {
     href: "/patient/games/routine-recall",
-    label: "Routine Recall",
+    key: "nav.routineRecall",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <circle cx="12" cy="12" r="10"/>
@@ -64,7 +66,7 @@ const NAV_ITEMS = [
   },
   {
     href: "/patient/games/family-faces",
-    label: "Family Faces",
+    key: "nav.familyFaces",
     icon: (
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -78,23 +80,42 @@ const NAV_ITEMS = [
 
 export default function PatientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const [lang, setLang] = useState<SupportedLanguage>("as");
   const [syncedCount, setSyncedCount] = useState<number | null>(null);
   const [patientName, setPatientName] = useState("");
+  const [patientCode, setPatientCode] = useState("");
   const [patientPhoto, setPatientPhoto] = useState<string | null>(null);
   const [isDark, setIsDark] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      initClientAuth();
-      const storedName = localStorage.getItem("smaran_patient_name") || "";
-      const storedPhoto = localStorage.getItem("smaran_patient_photo") || null;
-      setPatientName(storedName);
-      setPatientPhoto(storedPhoto);
+  const refreshState = () => {
+    if (typeof window === "undefined") return;
+    const storedLang = (localStorage.getItem("smaran_lang") || "as") as SupportedLanguage;
+    const storedName = localStorage.getItem("smaran_patient_name") || "Bhaben Baruah";
+    const storedCode = localStorage.getItem("smaran_patient_code") || localStorage.getItem("smaran_patient_id") || "pat_602188";
+    const storedPhoto = localStorage.getItem("smaran_patient_photo") || null;
+    setLang(storedLang);
+    setPatientName(storedName);
+    setPatientCode(storedCode);
+    setPatientPhoto(storedPhoto);
 
-      const theme = localStorage.getItem("smaran_theme");
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-      setIsDark(theme === "dark" || (!theme && prefersDark));
+    const theme = localStorage.getItem("smaran_theme");
+    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    setIsDark(theme === "dark" || (!theme && prefersDark));
+  };
+
+  useEffect(() => {
+    initClientAuth();
+    refreshState();
+
+    // Listen for cross-tab or in-page language changes
+    const handleStorage = () => refreshState();
+    window.addEventListener("storage", handleStorage);
+
+    let channel: BroadcastChannel | null = null;
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      channel = new BroadcastChannel("smaran_sync");
+      channel.onmessage = () => refreshState();
     }
 
     const doSync = async () => {
@@ -113,7 +134,12 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
     };
     doSync();
     window.addEventListener("online", doSync);
-    return () => window.removeEventListener("online", doSync);
+
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("online", doSync);
+      if (channel) channel.close();
+    };
   }, []);
 
   const toggleTheme = () => {
@@ -139,13 +165,14 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
           </Link>
           <div className="flex items-center gap-3">
             <OfflineIndicator />
-            {/* User profile photo / initial - clicking it opens home page */}
+            {/* User profile photo / initial */}
             <Link
               href="/patient/home"
               title="Go to Home"
               className="w-9 h-9 rounded-full overflow-hidden blue-gradient flex items-center justify-center text-white text-xs font-bold border-2 border-white dark:border-sky-900 shadow-card hover:scale-105 transition-transform"
             >
               {patientPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={patientPhoto} alt={patientName || "Patient"} className="w-full h-full object-cover" />
               ) : (
                 <span>{initial}</span>
@@ -180,13 +207,15 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
               S
             </div>
             <div>
-              <h1 className="text-lg font-bold text-[var(--text-primary)] leading-none">Smaran</h1>
-              <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide">Cognitive Companion</span>
+              <h1 className="text-lg font-bold text-[var(--text-primary)] leading-none">{getTranslation(lang, "app.name")}</h1>
+              <span className="text-[10px] text-[var(--text-muted)] font-medium tracking-wide">
+                {getTranslation(lang, "app.cognitiveCompanion")}
+              </span>
             </div>
           </Link>
         </div>
 
-        {/* User Profile Card - clicking opens home page */}
+        {/* User Profile Card with Patient Code displayed prominently under name */}
         <div className="px-4 py-4">
           <Link
             href="/patient/home"
@@ -195,15 +224,21 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
           >
             <div className="w-11 h-11 rounded-full overflow-hidden blue-gradient flex items-center justify-center text-white font-bold shadow-card shrink-0 border-2 border-white/80 dark:border-sky-900 group-hover:scale-105 transition-transform">
               {patientPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={patientPhoto} alt={patientName || "Patient"} className="w-full h-full object-cover" />
               ) : (
                 <span className="text-base">{initial}</span>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-[var(--text-primary)] truncate group-hover:text-[var(--accent)] transition-colors">
+              <p className="text-sm font-bold text-[var(--text-primary)] truncate group-hover:text-sky-600 transition-colors">
                 {patientName || "Patient"}
               </p>
+              {patientCode && (
+                <p className="text-[11px] font-mono text-sky-600 dark:text-sky-400 font-semibold tracking-wide truncate">
+                  ID: {patientCode}
+                </p>
+              )}
               <div className="mt-0.5"><OfflineIndicator /></div>
             </div>
           </Link>
@@ -211,13 +246,26 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
 
         {/* Activities Navigation */}
         <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
-          <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-2">Activities</p>
-          {NAV_ITEMS.map((item) => {
+          <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-[var(--text-muted)] mb-2">
+            {getTranslation(lang, "nav.activities")}
+          </p>
+          {NAV_CONFIG.map((item) => {
             const isActive = pathname === item.href;
+            const label = getTranslation(lang, item.key);
             return (
-              <Link key={item.href} href={item.href} className={`nav-item ${isActive ? "active" : ""}`}>
+              <Link
+                key={item.href}
+                href={item.href}
+                onClick={() => {
+                  if (item.href.includes("games")) {
+                    const msg = `${getTranslation(lang, "voice.letsPlay")}: ${label}`;
+                    speakPrompt(msg, lang).catch(() => {});
+                  }
+                }}
+                className={`nav-item ${isActive ? "active" : ""}`}
+              >
                 {item.icon}
-                <span>{item.label}</span>
+                <span>{label}</span>
               </Link>
             );
           })}
@@ -231,7 +279,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
               <line x1="2" y1="12" x2="22" y2="12"/>
               <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
             </svg>
-            <span>Language</span>
+            <span>{getTranslation(lang, "nav.language")}</span>
           </Link>
           <button onClick={toggleTheme} className="nav-item w-full">
             {isDark ? (
@@ -239,7 +287,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
             ) : (
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
             )}
-            <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+            <span>{isDark ? getTranslation(lang, "nav.lightMode") : getTranslation(lang, "nav.darkMode")}</span>
           </button>
 
           {syncedCount !== null && (
@@ -267,19 +315,27 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
             </button>
             <Link href="/patient/home" className="flex items-center gap-2" title="Smaran Home">
               <div className="w-8 h-8 rounded-lg blue-gradient flex items-center justify-center text-white font-bold text-sm shadow-card">S</div>
-              <span className="font-bold text-[var(--text-primary)]">Smaran</span>
+              <div>
+                <span className="font-bold text-[var(--text-primary)] text-sm">{getTranslation(lang, "app.name")}</span>
+                {patientCode && (
+                  <span className="text-[10px] font-mono text-sky-600 dark:text-sky-400 font-semibold block leading-none">
+                    ID: {patientCode}
+                  </span>
+                )}
+              </div>
             </Link>
           </div>
 
           <div className="flex items-center gap-2.5">
             <OfflineIndicator />
-            {/* Mobile profile photo or initial - clicking opens home page */}
+            {/* Mobile profile photo or initial */}
             <Link
               href="/patient/home"
               title="Go to Home"
               className="w-9 h-9 rounded-full overflow-hidden blue-gradient flex items-center justify-center text-white text-xs font-bold border-2 border-white dark:border-sky-900 shadow-card hover:scale-105 active:scale-95 transition-transform"
             >
               {patientPhoto ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img src={patientPhoto} alt={patientName || "Patient"} className="w-full h-full object-cover" />
               ) : (
                 <span>{initial}</span>
@@ -291,17 +347,24 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
         {/* Mobile menu dropdown */}
         {mobileMenuOpen && (
           <div className="border-t border-[var(--border)] surface px-3 py-3 space-y-1 animate-slide-down shadow-lg">
-            {NAV_ITEMS.map((item) => {
+            {NAV_CONFIG.map((item) => {
               const isActive = pathname === item.href;
+              const label = getTranslation(lang, item.key);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  onClick={() => setMobileMenuOpen(false)}
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    if (item.href.includes("games")) {
+                      const msg = `${getTranslation(lang, "voice.letsPlay")}: ${label}`;
+                      speakPrompt(msg, lang).catch(() => {});
+                    }
+                  }}
                   className={`nav-item ${isActive ? "active" : ""}`}
                 >
                   {item.icon}
-                  <span>{item.label}</span>
+                  <span>{label}</span>
                 </Link>
               );
             })}
@@ -316,7 +379,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
                   <line x1="2" y1="12" x2="22" y2="12"/>
                   <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
                 </svg>
-                <span>Language</span>
+                <span>{getTranslation(lang, "nav.language")}</span>
               </Link>
               <button
                 onClick={() => {
@@ -330,7 +393,7 @@ export default function PatientLayout({ children }: { children: React.ReactNode 
                 ) : (
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
                 )}
-                <span>{isDark ? "Light Mode" : "Dark Mode"}</span>
+                <span>{isDark ? getTranslation(lang, "nav.lightMode") : getTranslation(lang, "nav.darkMode")}</span>
               </button>
             </div>
           </div>

@@ -87,3 +87,37 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+/**
+ * DELETE /api/patients?patientId=pat_xxx
+ * Removes a patient and associated records.
+ */
+export async function DELETE(request: NextRequest) {
+  try {
+    const { searchParams } = request.nextUrl;
+    const patientId = searchParams.get("patientId");
+
+    if (!patientId) {
+      return NextResponse.json(
+        { error: "patientId is required" },
+        { status: 400 }
+      );
+    }
+
+    const { deletePatient } = await import("@/lib/serverStore");
+    const success = await deletePatient(patientId);
+
+    if (!success) {
+      return NextResponse.json(
+        { error: "Patient not found or could not be deleted" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true, message: "Patient removed successfully" });
+  } catch (err) {
+    console.error("[Patients API DELETE]", err);
+    const message = err instanceof Error ? err.message : "Failed to delete patient";
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
+}

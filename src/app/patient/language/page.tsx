@@ -57,6 +57,11 @@ export default function LanguageSelectorPage() {
     setSelected(code);
     if (typeof window !== "undefined") {
       localStorage.setItem("smaran_lang", code);
+      if ("BroadcastChannel" in window) {
+        const channel = new BroadcastChannel("smaran_sync");
+        channel.postMessage({ type: "LANGUAGE_CHANGED", language: code });
+        channel.close();
+      }
     }
   };
 
@@ -76,6 +81,11 @@ export default function LanguageSelectorPage() {
   const handleConfirm = () => {
     if (typeof window !== "undefined") {
       localStorage.setItem("smaran_lang", selected);
+      if ("BroadcastChannel" in window) {
+        const channel = new BroadcastChannel("smaran_sync");
+        channel.postMessage({ type: "LANGUAGE_CHANGED", language: selected });
+        channel.close();
+      }
     }
     router.push("/patient/home");
   };

@@ -14,12 +14,22 @@ import path from "path";
 import { isFirebaseAdminConfigured, getAdminFirestoreSafe } from "./firebaseAdmin";
 import { Patient, GameSession, CheckIn, CaregiverAlert, SupportedLanguage } from "./types";
 
+interface FamilyMemberRecord {
+  id: string;
+  patientId: string;
+  name: string;
+  relation: string;
+  photoBase64: string;
+  createdAt: string;
+}
+
 interface SmaranServerData {
   patients: Patient[];
   patientCodes: Record<string, { code: string; patientId: string; caregiverId: string; createdAt: number }>;
   gameSessions: GameSession[];
   checkIns: CheckIn[];
   alerts: CaregiverAlert[];
+  familyMembers: FamilyMemberRecord[];
 }
 
 const DATA_DIR = path.join(process.cwd(), ".data");
@@ -114,6 +124,7 @@ function loadFileData(): SmaranServerData {
         inMemoryData.gameSessions = inMemoryData.gameSessions || [];
         inMemoryData.checkIns = inMemoryData.checkIns || [];
         inMemoryData.alerts = inMemoryData.alerts || [];
+        inMemoryData.familyMembers = inMemoryData.familyMembers || [];
 
         // Ensure default patients exist
         for (const p of INITIAL_PATIENTS) {
@@ -154,6 +165,7 @@ function loadFileData(): SmaranServerData {
         acknowledged: false,
       },
     ],
+    familyMembers: [],
   };
 
   saveFileData();
@@ -449,4 +461,86 @@ export async function acknowledgeAlert(alertId: string): Promise<void> {
     alert.acknowledged = true;
     saveFileData();
   }
+}
+
+// ─────────────────────────────────────────────────────────
+// DELETE PATIENT
+// ─────────────────────────────────────────────────────────
+
+export async function deletePatient(patientId: string): Promise<boolean> {
+  const store = loadFileData();
+  const patient = store.patients.find((p) => p.id === patientId);
+  if (!patient) return false;
+
+  // Remove from patients array
+  store.patients = store.patients.filter((p) => p.id !== patientId);
+
+  // Remove pairing code
+  if (patient.pairingCode && store.patientCodes[patient.pairingCode]) {
+    delete store.patientCodes[patient.pairingCode];
+  }
+
+  // Remove associated game sessions, check-ins, alerts, family members
+  store.gameSessions = store.gameSessions.filter((s) => s.patientId !== patientId);
+  store.checkIns = store.checkIns.filter((c) => c.patientId !== patientId);
+  store.alerts = store.alerts.filter((a) => a.patientId !== patientId);
+  store.familyMembers = store.familyMembers.filter((m) => m.patientId !== patientId);
+
+  saveFileData();
+
+  // If Firebase Admin is available, delete from Cloud Firestore too
+  if (isFirebaseAdminConfigured()) {
+    try {
+      const db = getAdminFirestoreSafe();
+      if (db) {
+        await db.collection("patients").doc(patientId).delete();
+        if (patient.pairingCode) {
+          await db.collection("patientCodes").doc(patient.pairingCode).delete();
+        }
+      }
+    } catch (err) {
+      console.warn("[ServerStore] Firestore delete patient failed:", err);
+    }
+  }
+
+  return true;
+}
+
+// ─────────────────────────────────────────────────────────
+// FAMILY MEMBER OPERATIONS
+// ─────────────────────────────────────────────────────────
+
+export async function saveFamilyMember(data: {
+  id: string;
+  patientId: string;
+  name: string;
+  relation: string;
+  photoBase64: string;
+  createdAt: string;
+}): Promise<void> {
+  const store = loadFileData();
+  // Avoid duplicates
+  const existingIndex = store.familyMembers.findIndex((m) => m.id === data.id);
+  if (existingIndex >= 0) {
+    store.familyMembers[existingIndex] = data;
+  } else {
+    store.familyMembers.unshift(data);
+  }
+  saveFileData();
+}
+
+export async function getFamilyMembersForPatient(patientId: string): Promise<FamilyMemberRecord[]> {
+  const store = loadFileData();
+  return store.familyMembers.filter((m) => m.patientId === patientId);
+}
+
+export async function deleteFamilyMember(memberId: string): Promise<boolean> {
+  const store = loadFileData();
+  const before = store.familyMembers.length;
+  store.familyMembers = store.familyMembers.filter((m) => m.id !== memberId);
+  if (store.familyMembers.length < before) {
+    saveFileData();
+    return true;
+  }
+  return false;
 }
